@@ -7,7 +7,95 @@ work when disks go bad.
 
 Do not use this unless you are a SCSI initiator or filesystem developer!
 
-You can add errors like this :
+Show all current error injections:
+./usr/tgtadm --mode error --op show
+
+Discard all current error injections:
+./usr/tgtadm --mode error --op delete
+
+Add a new error injection:
+./usr/tgtadm --mode error --op new --tid 1 --lun 3 --error op=<command>,lba=<lba>,len=<len>,pct=<pct>,pause=<seconds>,repeat=<count>,action=<action>,key=<key>,asc=<asc>
+
+<command> is the SCSI command. Supported SCSI commands are
+READ6/10/12/16, WRITE6/10/12/16
+
+<lba> is the first LBA affected by this error.
+
+<len> is num ber of blocks, starting at <lba> that is affected by this error.
+
+<pct> is probability in percent that this error will trigger. It is usually 100
+but you can set it to something smaller to emulate a transient error.
+Perhaps setting pct=10 for any READ/WRITE to make a disk fail 10% of all
+operations could be a good torture test for an initiator/filesystem to test
+that it can handle and redrive I/O on recoverable errors.
+
+<seconds> is number of seconds the device will hand for errors triggered by this
+rule before it will respond to the request. This is probably almost always
+going to be 0.
+
+<count> If set to > 0 then this error will only trigger <count> times before
+the error rule will become disabled. This is useful for transient errors.
+
+<action> Is the type of action that willb e taken if the rule triggers.
+CHECK_CONDITION means that we will fail the I/O with a SCSI Check Condition.
+For Check Condition you must also specify key and asc.
+
+<key> is the SCSI sense key to return for check condition.
+Example: key==3 means MEDIUM_ERROR and is useful for emulating damaged disks.
+
+<asc> is the SCSI ASC to return for check conditions.
+Example: asc==0x0c02 means WRITE ERROR
+You can add errors like this :AUTOREALLOCATION FAILED.
+See SPC4 for a list of all ASCs.
+
+
+
+===
+Example: show how to create a multi-device filesystem and then "break"
+one of the devices to see how the fulesystem copes.
+===
+#
+# Create three disks and export them through flaky iSCSI
+#
+truncate -s 1G /data/tmp/disk1.img
+truncate -s 1G /data/tmp/disk2.img
+truncate -s 1G /data/tmp/disk3.img
+
+killall -9 tgtd
+./usr/tgtd -f -d 1 &
+
+sleep 3
+
+./usr/tgtadm --op new --mode target --tid 1 -T iqn.ronnie.test
+
+./usr/tgtadm --op new --mode logicalunit --tid 1 --lun 1 -b /data/tmp/disk1.img --blocksize=4096
+./usr/tgtadm --op new --mode logicalunit --tid 1 --lun 2 -b /data/tmp/disk2.img --blocksize=4096
+./usr/tgtadm --op new --mode logicalunit --tid 1 --lun 3 -b /data/tmp/disk3.img --blocksize=4096
+
+./usr/tgtadm --op bind --mode target --tid 1 -I ALL
+
+
+#
+# connect to the three disks
+#
+iscsiadm --mode discoverydb --type sendtargets --portal 127.0.0.1 --discover
+iscsiadm --mode node --targetname iqn.ronnie.test --portal 127.0.0.1:3260 --login
+#
+# check dmesg, you should now have three new 1G disks
+#
+# Use: iscsiadm --mode node --targetname iqn.ronnie.test \
+#      --portal 127.0.0.1:3260 --logout
+# to disconnect the disks when you are finished.
+
+
+# create a btrfs filesystem
+mkfs.btrfs -f -d raid1 /dev/disk/by-path/ip-127.0.0.1:3260-iscsi-iqn.ronnie.test-lun-1 /dev/disk/by-path/ip-127.0.0.1:3260-iscsi-iqn.ronnie.test-lun-2 /dev/disk/by-path/ip-127.0.0.1:3260-iscsi-iqn.ronnie.test-lun-3
+
+# mount the filesystem
+mount /dev/disk/by-path/ip-127.0.0.1:3260-iscsi-iqn.ronnie.test-lun-1 /mnt
+
+# copy some big files to the filesystem
+
 # make it impossible to write to the third disk
 # 3 - MEDIUM ERROR
 # 0x0c02 - WRITE ERROR AUTOREALLOCATION FAILED
@@ -30,80 +118,3 @@ Setting repeat!=0 means that this condition will ONLY apply that many times and 
 # To delete/clear all current error injects:
 # ./usr/tgtadm --mode error --op delete
 
-
-
-=====================
-=====================
-
-
-
-Introduction
--------------
-Linux target framework (tgt) aims to simplify various SCSI target
-driver (iSCSI, Fibre Channel, SRP, etc) creation and maintenance.
-
-Currently, tgt supports the following target drivers:
-
-- iSCSI software target driver for Ethernet NICs
-
-- iSER software target driver for Infiniband and RDMA NICs
-
-- IBM System p VIO server
-
-- FCoE software target driver for Ethernet NICs (in progress)
-
-- Qlogic qla2xxx FC target driver (in progress)
-
-Tgt consists of kernel modules, user-space daemon, and user-space
-tools. iSCSI, iSER, and FCoE target drivers use only user-space daemon
-and tools (i.e. they are just user-space applications. They don't need
-any kernel support).
-
-tgt can emulate the following device types:
-
-- SBC: a virtual disk drive that can use a file to store the content.
-
-- SMC: a virtual media jukebox that can be controlled by the "mtx"
-tool.
-
-- MMC: a virtual DVD drive that can read DVD-ROM iso files and create
-burnable DVD+R. It can be combined with SMC to provide a fully
-operational DVD jukebox.
-
-- SSC: a virtual tape device (aka VTL) that can use a file to store
-the content.
-
-- OSD: a virtual object-based storage device that can use a file to
-store the content (in progress).
-
-The code is under the GNU General Public License version 2.
-
-
-Preparation
--------------
-Linux kernel 2.6.22 or newer are recommended because tgt can get
-better performance with signalfd.
-
-Target drivers have their own ways to build, configure, etc. Please
-find an appropriate documentation in the doc directory. You might find
-other useful information on tgt's site:
-
-http://stgt.sourceforge.net/
-
-
-Developer Notes
--------------
-The central resource for tgt development is the mailing list
-(stgt@vger.kernel.org).
-
-First, please read the following documents (in short, follow Linux
-kernel development rules):
-
-http://lxr.linux.no/source/Documentation/CodingStyle
-http://lxr.linux.no/source/Documentation/SubmittingPatches
-
-Then, check your patches with the patch style checker prior to
-submission (scripts/checkpatch.pl) like the following example.
-
-fujita@arbre:~/git/tgt$ ./scripts/checkpatch.pl ~/0001-add-bidi-support.patch
-Your patch has no obvious style problems and is ready for submission.
