@@ -44,8 +44,7 @@ For Check Condition you must also specify key and asc.
 Example: key==3 means MEDIUM_ERROR and is useful for emulating damaged disks.
 
 <asc> is the SCSI ASC to return for check conditions.
-Example: asc==0x0c02 means WRITE ERROR
-You can add errors like this :AUTOREALLOCATION FAILED.
+Example: asc==0x0c02 means WRITE ERROR AUTOREALLOCATION FAILED.
 See SPC4 for a list of all ASCs.
 
 
