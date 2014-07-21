@@ -1,3 +1,18 @@
+This is probably not the version of TGT you are looking for.
+
+This is a special version of TGTD that is used to emulate a flaky/broken disk
+and is not useful to you unless you are a SCSI initiator driver developer or
+a filesystem developer and you want to test how your error recovery paths
+work when disks go bad.
+
+Do not use this unless you are a SCSI initiator or filesystem developer!
+
+
+=====================
+=====================
+
+
+
 Introduction
 -------------
 Linux target framework (tgt) aims to simplify various SCSI target
