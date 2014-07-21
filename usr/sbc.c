@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 #include <linux/fs.h>
 #include <sys/types.h>
@@ -239,6 +240,48 @@ sense:
 	return SAM_STAT_CHECK_CONDITION;
 }
 
+static int error_inject(int host_no, struct scsi_cmd *cmd,
+			uint64_t lba, uint32_t tl)
+{
+	struct error_item *err;
+	static int seeded = 0;
+
+	if (!seeded) {
+		seeded = 1;
+		srandom(getpid() ^ time(NULL));
+	}
+
+	for (err = error_list; err; err = err->next) {
+		if (err->op != cmd->scb[0])
+			continue;
+		if (err->tid != cmd->c_target->tid)
+			continue;
+		if (err->lun != cmd->dev_id)
+			continue;
+		if (err->lba > lba + tl)
+			continue;
+		if (err->lba + err->len <= lba)
+			continue;
+		if (err->repeat > 0 && err->count >= err->repeat)
+			continue;
+		if (err->pct < (random() % 101))
+			continue;
+
+		err->count++;
+		if (err->pause)
+			sleep(err->pause);
+		if (err->action == ErrAct_checkcondition) {
+			scsi_set_in_resid_by_actual(cmd, 0);
+			scsi_set_out_resid_by_actual(cmd, 0);
+
+			sense_data_build(cmd, err->key, err->asc);
+			return SAM_STAT_CHECK_CONDITION;
+		}
+
+	}
+	return SAM_STAT_GOOD;
+}
+
 static int sbc_rw(int host_no, struct scsi_cmd *cmd)
 {
 	int ret;
@@ -332,6 +375,11 @@ static int sbc_rw(int host_no, struct scsi_cmd *cmd)
 
 	lba = scsi_rw_offset(cmd->scb);
 	tl  = scsi_rw_count(cmd->scb);
+
+	ret = error_inject(host_no, cmd, lba, tl);
+	if (ret != SAM_STAT_GOOD)
+		return ret;
+
 
 	/* Verify that we are not doing i/o beyond
 	   the end-of-lun */

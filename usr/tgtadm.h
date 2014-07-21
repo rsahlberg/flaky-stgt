@@ -30,6 +30,7 @@ enum tgtadm_mode {
 	MODE_SESSION,
 	MODE_CONNECTION,
 	MODE_ACCOUNT,
+	MODE_ERRORS,
 };
 
 enum tgtadm_account_dir {

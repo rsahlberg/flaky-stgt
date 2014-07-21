@@ -92,4 +92,25 @@ static inline int queue_active(const struct tgt_cmd_queue *q)		\
 QUEUE_FNS(BLOCKED, blocked)
 QUEUE_FNS(DELETED, deleted)
 
+struct error_item {
+	struct error_item *next;
+	int tid;
+	int lun;
+	int op;
+	int pct;
+	int pause;
+	int repeat;
+	int count;
+	int action;
+	int key;
+	int asc;
+	uint64_t lba;
+	uint64_t len;
+};
+
+struct error_item *error_list;
+enum {
+	ErrAct_checkcondition,
+};
+
 #endif

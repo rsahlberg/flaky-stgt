@@ -40,6 +40,9 @@
 #include "tgtadm.h"
 #include "driver.h"
 #include "util.h"
+#include "parser.h"
+#include "target.h"
+#include "scsi.h"
 
 enum mgmt_task_state {
 	MTASK_STATE_HDR_RECV,
@@ -316,6 +319,199 @@ static tgtadm_err account_mgmt(int lld_no,  struct mgmt_task *mtask)
 	return adm_err;
 }
 
+struct error_item *error_list = NULL;
+
+enum {
+	Opt_op, Opt_pct, Opt_lba, Opt_len, Opt_pause, Opt_repeat, Opt_action,
+	Opt_key, Opt_asc,
+};
+
+static match_table_t error_tokens = {
+	{Opt_op, "op=%s"},
+	{Opt_pct, "pct=%s"},
+	{Opt_lba, "lba=%s"},
+	{Opt_len, "len=%s"},
+	{Opt_pause, "pause=%s"},
+	{Opt_repeat, "repeat=%d"},
+	{Opt_action, "action=%s"},
+	{Opt_key, "key=%d"},
+	{Opt_asc, "asc=%d"},
+};
+
+tgtadm_err tgt_error_create(int tid, uint64_t lun, char *params)
+{
+	char *p;
+	char *operation = NULL, *action = NULL;
+	int op, pct, lba, len, pause, repeat, ac, key, asc;
+	struct error_item *err;
+
+	while ((p = strsep(&params, ",")) != NULL) {
+		substring_t args[MAX_OPT_ARGS];
+		int token;
+		if (!*p)
+			continue;
+		token = match_token(p, error_tokens, args);
+
+		switch (token) {
+		case Opt_op:
+			operation = match_strdup(&args[0]);
+			break;
+		case Opt_pct:
+			match_int(&args[0], &pct);
+			break;
+		case Opt_lba:
+			match_int(&args[0], &lba);
+			break;
+		case Opt_len:
+			match_int(&args[0], &len);
+			break;
+		case Opt_pause:
+			match_int(&args[0], &pause);
+			break;
+		case Opt_repeat:
+			match_int(&args[0], &repeat);
+			break;
+		case Opt_action:
+			action = match_strdup(&args[0]);
+			break;
+		case Opt_key:
+			match_int(&args[0], &key);
+			break;
+		case Opt_asc:
+			match_int(&args[0], &asc);
+			break;
+		default:
+			break;
+		}
+	}
+
+	if (!strcmp(operation, "READ6"))
+		op = READ_6;
+	else if (!strcmp(operation, "READ10"))
+		op = READ_10;
+	else if (!strcmp(operation, "READ12"))
+		op = READ_12;
+	else if (!strcmp(operation, "READ16"))
+		op = READ_16;
+	else if (!strcmp(operation, "WRITE6"))
+		op = WRITE_6;
+	else if (!strcmp(operation, "WRITE10"))
+		op = WRITE_10;
+	else if (!strcmp(operation, "WRITE12"))
+		op = WRITE_12;
+	else if (!strcmp(operation, "WRITE16"))
+		op = WRITE_16;
+	else
+		return TGTADM_INVALID_REQUEST;
+
+
+	if (!strcmp(action, "CHECK_CONDITION"))
+		ac = ErrAct_checkcondition;
+	else
+		return TGTADM_INVALID_REQUEST;
+
+	err = malloc(sizeof(struct error_item));
+	if (!err)
+		return TGTADM_NOMEM;
+
+	err->tid    = tid;
+	err->lun    = lun;
+	err->op     = op;
+	err->pct    = pct;
+	err->lba    = lba;
+	err->len    = len;
+	err->pause  = pause;
+	err->repeat = repeat;
+	err->count  = 0;
+	err->action = ac;
+	err->key    = key;
+	err->asc    = asc;
+	err->next   = NULL;
+
+	if (!error_list)
+		error_list  = err;
+	else {
+		struct error_item *tmp;
+		for (tmp = error_list; tmp->next; tmp = tmp->next)
+			;
+		tmp->next = err;
+	}
+
+	return TGTADM_SUCCESS;
+}
+
+char *opcode_to_str(int op)
+{
+	switch (op) {
+	case READ_6:  return "READ6";
+	case READ_10: return "READ10";
+	case READ_12: return "READ12";
+	case READ_16: return "READ16";
+	case WRITE_6:  return "WRITE6";
+	case WRITE_10: return "WRITE10";
+	case WRITE_12: return "WRITE12";
+	case WRITE_16: return "WRITE16";
+	default: return "UNKNOWN_OPCODE";
+	}
+}
+
+char *erraction_to_str(int ac)
+{
+	return "TARGET_RESET";
+}
+
+tgtadm_err tgt_error_show(int mode, struct concat_buf *b)
+{
+	struct error_item *err;
+	int i;
+
+	for (i=0, err = error_list; err; i++, err = err->next) {
+		concat_printf(b, "%d: TID:%d LUN:%d %s %d-%d %d%% pause:%d Count:%d/%d %s\n",
+			      i, err->tid, err->lun, opcode_to_str(err->op),
+			      err->lba, err->lba + err->len - 1,
+			      err->pct, err->pause,
+			      err->count, err->repeat,
+			      erraction_to_str(err->action));
+	}
+	return TGTADM_SUCCESS;
+}
+
+tgtadm_err tgt_error_delete(void)
+{
+	while (error_list) {
+		struct error_item *next = error_list->next;
+
+		free(error_list);
+		error_list = next;
+	}
+
+	return TGTADM_SUCCESS;
+}
+
+static tgtadm_err err_mgmt(int lld_no, struct mgmt_task *mtask)
+{
+	struct tgtadm_req *req = &mtask->req;
+	tgtadm_err adm_err = TGTADM_INVALID_REQUEST;
+
+	switch (req->op) {
+	case OP_NEW:
+		adm_err = tgt_error_create(req->tid, req->lun, mtask->req_buf);
+		break;
+	case OP_SHOW:
+		concat_buf_init(&mtask->rsp_concat);
+		adm_err = tgt_error_show(req->mode, &mtask->rsp_concat);
+		concat_buf_finish(&mtask->rsp_concat);
+		break;
+	case OP_DELETE:
+		adm_err = tgt_error_delete();
+		break;
+	default:
+		break;
+	}
+
+	return adm_err;
+}
+
 static tgtadm_err sys_mgmt(int lld_no, struct mgmt_task *mtask)
 {
 	struct tgtadm_req *req = &mtask->req;
@@ -503,6 +699,9 @@ static tgtadm_err mtask_execute(struct mgmt_task *mtask)
 		req->tid, req->sid, req->lun, mtask->req_buf, getpid());
 
 	switch (req->mode) {
+	case MODE_ERRORS:
+		adm_err = err_mgmt(lld_no, mtask);
+		break;
 	case MODE_SYSTEM:
 		adm_err = sys_mgmt(lld_no, mtask);
 		break;

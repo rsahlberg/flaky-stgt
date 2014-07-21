@@ -7,6 +7,31 @@ work when disks go bad.
 
 Do not use this unless you are a SCSI initiator or filesystem developer!
 
+You can add errors like this :
+# make it impossible to write to the third disk
+# 3 - MEDIUM ERROR
+# 0x0c02 - WRITE ERROR AUTOREALLOCATION FAILED
+#
+./usr/tgtadm --mode error --op new --tid 1 --lun 3 --error op=WRITE10,lba=0,len=99999999,pct=100,pause=0,repeat=0,action=CHECK_CONDITION,key=3,asc=0x0c02
+
+which means:
+WRITE10 overlaps with the are LBA:0 and the next len:99999999 blocks
+will in 100% of the time fail with a Check condition and medium error/write error.
+There will not be any delay, and this will repeat forever.
+
+Setting delay!=0 means that the scsi disk will "hang" for that many seconds
+before responding.
+
+Setting repeat!=0 means that this condition will ONLY apply that many times and then it will "self heal".
+
+
+ To show all current error injects:
+# ./usr/tgtadm --mode error --op show
+#
+# To delete/clear all current error injects:
+# ./usr/tgtadm --mode error --op delete
+
+
 
 =====================
 =====================

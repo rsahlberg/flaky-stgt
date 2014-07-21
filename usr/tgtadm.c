@@ -110,6 +110,7 @@ struct option const long_options[] = {
 	{"lun", required_argument, NULL, 'l'},
 	{"name", required_argument, NULL, 'n'},
 	{"value", required_argument, NULL, 'v'},
+	{"error", required_argument, NULL, 'e'},
 	{"backing-store", required_argument, NULL, 'b'},
 	{"bstype", required_argument, NULL, 'E'},
 	{"bsopts", required_argument, NULL, 'S'},
@@ -131,7 +132,7 @@ struct option const long_options[] = {
 };
 
 static char *short_options =
-		"dhVL:o:m:t:s:c:l:n:v:b:E:f:y:T:I:Q:u:p:H:F:P:B:Y:O:C:S:";
+		"dhVL:o:m:t:s:c:l:n:v:b:E:e:f:y:T:I:Q:u:p:H:F:P:B:Y:O:C:S:";
 
 static void usage(int status)
 {
@@ -429,6 +430,8 @@ static int str_to_mode(char *str)
 		return MODE_ACCOUNT;
 	else if (!strcmp("lld", str))
 		return MODE_LLD;
+	else if (!strcmp("error", str))
+		return MODE_ERRORS;
 	else {
 		eprintf("unknown mode: %s\n", str);
 		exit(1);
@@ -497,7 +500,7 @@ int main(int argc, char **argv)
 	uint32_t cid, hostno;
 	uint64_t sid, lun, force;
 	char *name, *value, *path, *targetname, *address, *iqnname, *targetOps;
-	char *portalOps, *bstype, *bsopts;
+	char *portalOps, *bstype, *bsopts, *error;
 	char *bsoflags;
 	char *blocksize;
 	char *user, *password;
@@ -513,7 +516,7 @@ int main(int argc, char **argv)
 	dev_type = TYPE_DISK;
 	ac_dir = ACCOUNT_TYPE_INCOMING;
 	name = value = path = targetname = address = iqnname = NULL;
-	targetOps = portalOps = bstype = bsopts = NULL;
+	targetOps = portalOps = bstype = bsopts = error = NULL;
 	bsoflags = blocksize = user = password = op_name = NULL;
 	force = 0;
 
@@ -598,6 +601,9 @@ int main(int argc, char **argv)
 			break;
 		case 'y':
 			blocksize = optarg;
+			break;
+		case 'e':
+			error = optarg;
 			break;
 		case 'E':
 			bstype = optarg;
@@ -946,6 +952,9 @@ int main(int argc, char **argv)
 
 	if (name)
 		concat_printf(&b, "%s=%s", name, value);
+	if (error)
+		concat_printf(&b, "%s", error);
+
 	if (path)
 		concat_printf(&b, "%spath=%s", concat_delim(&b, ","), path);
 
